@@ -22,32 +22,33 @@ GCPacker::GCPacker(const char *path, const char *fileName) {
     LOG("Initialised:")
     LOG(m_Initialised)
 
+
     for (int i = 0; i < m_GarlicFile.tellg(); i += GCFILE_STRUCT_SIZE) {
 
         m_GarlicFile.seekg(i);
+
         char pRawFile[GCFILE_STRUCT_SIZE];
         m_GarlicFile.read(pRawFile, GCFILE_STRUCT_SIZE);
         auto pGarlicFile = reinterpret_cast<GCFile *>(pRawFile);
-        m_GCFileCache.insert(std::pair(pGarlicFile->fileName, std::pair(i, *pGarlicFile)));
+        m_GCFileCache[pGarlicFile->fileName] = std::make_pair(m_GCFileCache.size(), *pGarlicFile);
+        m_GarlicFile.seekg(0, std::ios::end);
     }
 }
 
-void GCPacker::addFile(const std::string &name, const std::byte* file, size_t size,
+void GCPacker::addFile(const std::string &name, const std::byte *file, size_t size,
                        ErrorResult &error) {
     if (!m_Initialised) {
         error = ErrorResult::INITIALISATION_ERROR;
         return;
     }
-
     GCFile gcFile;
     if (m_GCFileCache.contains(name)) {
         gcFile = m_GCFileCache[name].second;
         gcFile.iterationVersion++;
-        m_GarlicFile.seekg(0, std::ofstream::end);
+        gcFile.fileSize = size;
+        LOG(m_GCFileCache[name].first)
         m_GarlicFile.seekg(m_GCFileCache[name].first * GCFILE_STRUCT_SIZE);
-        LOG("EXISTS")
     } else {
-        m_GarlicFile.seekg(0, std::ofstream::end);
         gcFile = GCFile();
         gcFile.iterationVersion = 0;
         strcpy(gcFile.fileName, name.c_str());
@@ -82,8 +83,6 @@ void GCPacker::addFile(const std::string &name, const std::byte* file, size_t si
         return;
     }
 
-    LOG(vFile.tellp())
-
     vFile.write(reinterpret_cast<const char *>(file), size);
 
     if (vFile.bad()) {
@@ -92,12 +91,16 @@ void GCPacker::addFile(const std::string &name, const std::byte* file, size_t si
         return;
     }
 
-    m_GCFileCache[name].second = gcFile;
+    if (m_GCFileCache.contains(name))
+        m_GCFileCache[name].second = gcFile;
+    else
+        m_GCFileCache[name] = std::make_pair(m_GCFileCache.size(), gcFile);
+
     error = ErrorResult::NO_ERROR;
 
 }
 
-void GCPacker::readFile(const std::string name, std::byte* file, size_t &size, GCPacker::ErrorResult &error) {
+void GCPacker::readFile(const std::string name, std::byte *file, size_t &size, GCPacker::ErrorResult &error) {
 
     if (!m_GCFileCache.contains(name)) {
         error = ErrorResult::FILE_NOT_FOUND_ERROR;
@@ -113,14 +116,19 @@ void GCPacker::readFile(const std::string name, std::byte* file, size_t &size, G
     path.append(".clove");
 
     std::ifstream vFile(path);
-    if(!vFile.is_open()){
-        error = ErrorResult::READ_ERROR;
-        return;
-    }
-    if(!vFile.read(reinterpret_cast<char*>(file), gcFile.filePos)){
+    if (!vFile.is_open()) {
         error = ErrorResult::READ_ERROR;
         return;
     }
 
+    vFile.seekg(gcFile.filePos);
+
+    if (!vFile.read(reinterpret_cast<char *>(file), gcFile.fileSize)) {
+        error = ErrorResult::READ_ERROR;
+        return;
+    }
+
+    size = gcFile.fileSize;
+    error = ErrorResult::NO_ERROR;
 }
 
